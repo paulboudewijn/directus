@@ -18,11 +18,11 @@ export default function useSort(
 	const sort = ref<Sort>({ by: relation.value.sortField || fields.value[0], desc: false });
 
 	const sortedItems = computed(() => {
-		const sField = relation.value.sortField;
-		if (sField === null || sort.value.by !== sField) return items.value;
+		const sFields: string[] = [...(relation.value.sortField ? [relation.value.sortField] : fields.value)];
+		if (sFields.length == 0 ) return items.value;
 
 		const desc = sort.value.desc;
-		const sorted = sortBy(items.value, [sField]);
+		const sorted = sortBy(items.value, sFields);
 		return desc ? sorted.reverse() : sorted;
 	});
 
