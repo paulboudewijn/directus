@@ -260,10 +260,11 @@ export default defineComponent({
 			}
 
 			const sortedItems = computed(() => {
-				if (!relation.value.meta?.sort_field || sort.value.by !== relation.value.meta?.sort_field) return items.value;
+				const sFields: string[] = [...(relation.value.meta?.sort_field ? [relation.value.meta?.sort_field] : fields.value)];
+				if (sFields.length == 0) return items.value;
 
 				const desc = sort.value.desc;
-				const sorted = sortBy(items.value, [relation.value.meta.sort_field]);
+				const sorted = sortBy(items.value, [sFields]);
 				return desc ? sorted.reverse() : sorted;
 			});
 
