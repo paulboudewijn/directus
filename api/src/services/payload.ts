@@ -1,9 +1,10 @@
+import SchemaInspector from '@directus/schema';
 import { format, parseISO } from 'date-fns';
 import Joi from 'joi';
 import { Knex } from 'knex';
 import { clone, cloneDeep, isObject, isPlainObject, omit, pick, isNil } from 'lodash';
 import { v4 as uuidv4 } from 'uuid';
-import getDatabase from '../database';
+import getDatabase, { getSchemaInspector } from '../database';
 import { ForbiddenException, InvalidPayloadException } from '../exceptions';
 import { AbstractServiceOptions, Item, PrimaryKey, SchemaOverview, Alterations } from '../types';
 import { Accountability, Query } from '@directus/shared/types';
@@ -33,12 +34,14 @@ type Transformers = {
 export class PayloadService {
 	accountability: Accountability | null;
 	knex: Knex;
+	schemaInspector: ReturnType<typeof SchemaInspector>;
 	collection: string;
 	schema: SchemaOverview;
 
 	constructor(collection: string, options: AbstractServiceOptions) {
 		this.accountability = options.accountability || null;
 		this.knex = options.knex || getDatabase();
+		this.schemaInspector = options.knex ? SchemaInspector(options.knex) : getSchemaInspector();
 		this.collection = collection;
 		this.schema = options.schema;
 
@@ -400,10 +403,11 @@ export class PayloadService {
 			const hasPrimaryKey = relatedPrimary in relatedRecord;
 
 			let relatedPrimaryKey: PrimaryKey = relatedRecord[relatedPrimary];
+			let relatedTableSchema = (await this.schemaInspector.tableInfo(relatedCollection)).schema!;
 
 			const exists =
 				hasPrimaryKey &&
-				!!(await this.knex
+				!!(await this.knex.withSchema(relatedTableSchema)
 					.select(relatedPrimary)
 					.from(relatedCollection)
 					.where({ [relatedPrimary]: relatedPrimaryKey })
@@ -468,10 +472,11 @@ export class PayloadService {
 			const hasPrimaryKey = relatedPrimaryKeyField in relatedRecord;
 
 			let relatedPrimaryKey: PrimaryKey = relatedRecord[relatedPrimaryKeyField];
+			let relatedTableSchema = (await this.schemaInspector.tableInfo(relation.related_collection)).schema!;
 
 			const exists =
 				hasPrimaryKey &&
-				!!(await this.knex
+				!!(await this.knex//.withSchema(relatedTableSchema)
 					.select(relatedPrimaryKeyField)
 					.from(relation.related_collection)
 					.where({ [relatedPrimaryKeyField]: relatedPrimaryKey })
@@ -534,6 +539,8 @@ export class PayloadService {
 				schema: this.schema,
 			});
 
+			let relatedTableSchema = (await this.schemaInspector.tableInfo(relation.collection)).schema!;
+
 			const recordsToUpsert: Partial<Item>[] = [];
 			const savedPrimaryKeys: PrimaryKey[] = [];
 
@@ -545,7 +552,7 @@ export class PayloadService {
 					let record = cloneDeep(relatedRecord);
 
 					if (typeof relatedRecord === 'string' || typeof relatedRecord === 'number') {
-						const existingRecord = await this.knex
+						const existingRecord = await this.knex//.withSchema(relatedTableSchema)
 							.select(relatedPrimaryKeyField, relation.field)
 							.from(relation.collection)
 							.where({ [relatedPrimaryKeyField]: record })

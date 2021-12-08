@@ -1,6 +1,7 @@
 export type SchemaOverview = {
 	[table: string]: {
 		primary: string;
+		tableSchema?: string | null;
 		columns: {
 			[column: string]: {
 				table_name: string;

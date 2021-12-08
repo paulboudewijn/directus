@@ -76,7 +76,15 @@ export class FieldsService {
 			fields.push(...systemFieldRows);
 		}
 
-		const columns = (await this.schemaInspector.columnInfo(collection)).map((column) => ({
+		let schemasInDatabase = ["dbo", "test"];
+		let columnsInDatabase: Column[] = [];
+		for (let schema in schemasInDatabase) {
+			this.schemaInspector.withSchema!(schemasInDatabase[schema]);
+			let columnsInSchema = await this.schemaInspector.columnInfo(collection);
+			columnsInDatabase.push(...columnsInSchema);
+		}
+
+		const columns = columnsInDatabase.map((column) => ({
 			...column,
 			default_value: getDefaultValue(column),
 		}));
@@ -199,6 +207,8 @@ export class FieldsService {
 			systemFieldRows.find((fieldMeta) => fieldMeta.collection === collection && fieldMeta.field === field);
 
 		try {
+			const tableSchema: string = (await this.schemaInspector.tableInfo(collection)).schema!;
+			this.schemaInspector.withSchema!(tableSchema);
 			column = await this.schemaInspector.columnInfo(collection, field);
 			column.default_value = getDefaultValue(column);
 		} catch {
@@ -248,7 +258,8 @@ export class FieldsService {
 				if (table) {
 					this.addColumnToTable(table, field as Field);
 				} else {
-					await trx.schema.alterTable(collection, (table) => {
+					const tableSchema: string = (await this.schemaInspector.tableInfo(collection)).schema!;
+					await trx.schema.withSchema!(tableSchema).alterTable(collection, (table) => {
 						this.addColumnToTable(table, field as Field);
 					});
 				}
@@ -276,11 +287,13 @@ export class FieldsService {
 		}
 
 		if (field.schema) {
+			const tableSchema: string = (await this.schemaInspector.tableInfo(collection)).schema!;
+			this.schemaInspector.withSchema!(tableSchema);
 			const existingColumn = await this.schemaInspector.columnInfo(collection, field.field);
 
 			if (!isEqual(existingColumn, field.schema)) {
 				try {
-					await this.knex.schema.alterTable(collection, (table) => {
+					await this.knex.schema.withSchema!(tableSchema).alterTable(collection, (table) => {
 						if (!field.schema) return;
 						this.addColumnToTable(table, field, existingColumn);
 					});
@@ -420,7 +433,8 @@ export class FieldsService {
 				field in this.schema.collections[collection].fields &&
 				this.schema.collections[collection].fields[field].alias === false
 			) {
-				await trx.schema.table(collection, (table) => {
+				const tableSchema: string = (await this.schemaInspector.tableInfo(collection)).schema!;
+				await trx.schema.withSchema!(tableSchema).table(collection, (table) => {
 					table.dropColumn(field);
 				});
 			}

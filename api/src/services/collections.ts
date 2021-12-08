@@ -122,7 +122,7 @@ export class CollectionsService {
 					return field;
 				});
 
-				await trx.schema.createTable(payload.collection, (table) => {
+				await trx.schema.withSchema!('dbo').createTable(payload.collection, (table) => {
 					for (const field of payload.fields!) {
 						if (field.type && ALIAS_TYPES.includes(field.type) === false) {
 							fieldsService.addColumnToTable(table, field);
@@ -186,7 +186,13 @@ export class CollectionsService {
 			accountability: this.accountability,
 		});
 
-		let tablesInDatabase = await this.schemaInspector.tableInfo();
+		let schemasInDatabase = ["dbo", "test"];
+		let tablesInDatabase : Table[] = []; 
+		for (let schema in schemasInDatabase) {
+			this.schemaInspector.withSchema!(schemasInDatabase[schema]);
+			let tablesInSchema = await this.schemaInspector.tableInfo();
+			tablesInDatabase.push(...tablesInSchema);
+		}
 
 		let meta = (await collectionItemsService.readByQuery({
 			limit: -1,
@@ -429,7 +435,8 @@ export class CollectionsService {
 						.where({ id: relation.meta!.id });
 				}
 
-				await trx.schema.dropTable(collectionKey);
+				const tableSchema = (await this.schemaInspector.tableInfo(collectionKey)).schema!;
+				await trx.schema.withSchema!(tableSchema).dropTable(collectionKey);
 			}
 		});
 

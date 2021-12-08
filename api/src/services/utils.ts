@@ -1,5 +1,6 @@
 import { Knex } from 'knex';
-import getDatabase from '../database';
+import SchemaInspector from '@directus/schema';
+import getDatabase, { getSchemaInspector } from '../database';
 import { systemCollectionRows } from '../database/system-data/collections';
 import { ForbiddenException, InvalidPayloadException } from '../exceptions';
 import { AbstractServiceOptions, PrimaryKey, SchemaOverview } from '../types';
@@ -8,15 +9,19 @@ import { Accountability } from '@directus/shared/types';
 export class UtilsService {
 	knex: Knex;
 	accountability: Accountability | null;
+	schemaInspector: ReturnType<typeof SchemaInspector>;
 	schema: SchemaOverview;
 
 	constructor(options: AbstractServiceOptions) {
 		this.knex = options.knex || getDatabase();
 		this.accountability = options.accountability || null;
+		this.schemaInspector = options.knex ? SchemaInspector(options.knex) : getSchemaInspector();
 		this.schema = options.schema;
 	}
 
 	async sort(collection: string, { item, to }: { item: PrimaryKey; to: PrimaryKey }): Promise<void> {
+		const tableSchema = (await this.schemaInspector.tableInfo(collection)).schema!;
+
 		const sortFieldResponse =
 			(await this.knex.select('sort_field').from('directus_collections').where({ collection }).first()) ||
 			systemCollectionRows;
@@ -46,12 +51,12 @@ export class UtilsService {
 		const primaryKeyField = this.schema.collections[collection].primary;
 
 		// Make sure all rows have a sort value
-		const countResponse = await this.knex.count('* as count').from(collection).whereNull(sortField).first();
+		const countResponse = await this.knex.withSchema(tableSchema).count('* as count').from(collection).whereNull(sortField).first();
 
 		if (countResponse?.count && +countResponse.count !== 0) {
-			const lastSortValueResponse = await this.knex.max(sortField).from(collection).first();
+			const lastSortValueResponse = await this.knex.withSchema(tableSchema).max(sortField).from(collection).first();
 
-			const rowsWithoutSortValue = await this.knex
+			const rowsWithoutSortValue = await this.knex.withSchema(tableSchema)
 				.select(primaryKeyField, sortField)
 				.from(collection)
 				.whereNull(sortField);
@@ -68,7 +73,7 @@ export class UtilsService {
 
 		// Check to see if there's any duplicate values in the sort counts. If that's the case, we'll have to
 		// reset the count values, otherwise the sort operation will cause unexpected results
-		const duplicates = await this.knex
+		const duplicates = await this.knex.withSchema(tableSchema)
 			.select(sortField)
 			.count(sortField, { as: 'count' })
 			.groupBy(sortField)
@@ -76,7 +81,7 @@ export class UtilsService {
 			.havingRaw('count(??) > 1', [sortField]);
 
 		if (duplicates?.length > 0) {
-			const ids = await this.knex.select(primaryKeyField).from(collection).orderBy(sortField);
+			const ids = await this.knex.withSchema(tableSchema).select(primaryKeyField).from(collection).orderBy(sortField);
 
 			// This might not scale that well, but I don't really know how to accurately set all rows
 			// to a sequential value that works cross-DB vendor otherwise
@@ -87,14 +92,14 @@ export class UtilsService {
 			}
 		}
 
-		const targetSortValueResponse = await this.knex
+		const targetSortValueResponse = await this.knex.withSchema(tableSchema)
 			.select(sortField)
 			.from(collection)
 			.where({ [primaryKeyField]: to })
 			.first();
 		const targetSortValue = targetSortValueResponse[sortField];
 
-		const sourceSortValueResponse = await this.knex
+		const sourceSortValueResponse = await this.knex.withSchema(tableSchema)
 			.select(sortField)
 			.from(collection)
 			.where({ [primaryKeyField]: item })

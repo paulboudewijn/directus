@@ -1,4 +1,6 @@
 import { Knex } from 'knex';
+import SchemaInspector from '@directus/schema';
+import { getSchemaInspector } from '../database';
 import { clone, cloneDeep, get, isPlainObject, set } from 'lodash';
 import { customAlphabet } from 'nanoid';
 import validate from 'uuid-validate';
@@ -18,6 +20,7 @@ const generateAlias = customAlphabet('abcdefghijklmnopqrstuvwxyz', 5);
  */
 export default function applyQuery(
 	knex: Knex,
+	tableSchema: string,
 	collection: string,
 	dbQuery: Knex.QueryBuilder,
 	query: Query,
@@ -86,7 +89,7 @@ export default function applyQuery(
 				filter = unionFilter;
 			}
 
-			return knex.select('*').from(applyFilter(knex, schema, dbQuery.clone(), filter, collection, subQuery).as('foo'));
+			return knex.withSchema(tableSchema).select('*').from(applyFilter(knex, schema, dbQuery.clone(), filter, collection, subQuery).as('foo'));
 		});
 
 		dbQuery = knex.unionAll(queries);
@@ -203,7 +206,7 @@ export function applyFilter(
 
 				if (relationType === 'm2o') {
 					dbQuery.leftJoin(
-						{ [alias]: relation.related_collection! },
+						`${relation.related_collection!} as ${alias}`,
 						`${parentAlias || parentCollection}.${relation.field}`,
 						`${alias}.${schema.collections[relation.related_collection!].primary}`
 					);
@@ -321,14 +324,20 @@ export function applyFilter(
 			} else if (subQuery === false) {
 				const pkField = `${collection}.${schema.collections[relation!.related_collection!].primary}`;
 
-				dbQuery[logical].whereIn(pkField, (subQueryKnex) => {
+				dbQuery[logical].whereIn(pkField, async (subQueryKnex) => {
 					const field = relation!.field;
 					const collection = relation!.collection;
 					const column = `${collection}.${field}`;
-					subQueryKnex.select({ [field]: column }).from(collection);
+
+					const schemaInspector = getSchemaInspector();
+					const tableSchema = (await schemaInspector.tableInfo(collection)).schema!;
+					subQueryKnex.withSchema(tableSchema).select({ [field]: column }).from(collection);
+
+					const tableSchemaRelatedCollection = (await schemaInspector.tableInfo(relation!.collection)).schema!;
 
 					applyQuery(
 						knex,
+						tableSchemaRelatedCollection,
 						relation!.collection,
 						subQueryKnex,
 						{

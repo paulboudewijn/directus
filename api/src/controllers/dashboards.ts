@@ -6,6 +6,7 @@ import { validateBatch } from '../middleware/validate-batch';
 import { MetaService, DashboardsService } from '../services';
 import { PrimaryKey } from '../types';
 import asyncHandler from '../utils/async-handler';
+import { getSchemaInspector } from '../database';
 
 const router = express.Router();
 
@@ -61,7 +62,9 @@ const readHandler = asyncHandler(async (req, res, next) => {
 	});
 
 	const records = await service.readByQuery(req.sanitizedQuery);
-	const meta = await metaService.getMetaForQuery(req.collection, req.sanitizedQuery);
+	const schemaInspector = getSchemaInspector();
+	const tableSchema = (await schemaInspector.tableInfo(req.collection)).schema!;
+	const meta = await metaService.getMetaForQueryWithSchema(tableSchema, req.collection, req.sanitizedQuery);
 
 	res.locals.payload = { data: records || null, meta };
 	return next();

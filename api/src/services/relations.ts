@@ -65,6 +65,8 @@ export class RelationsService {
 			return metaRow.many_collection === collection;
 		});
 
+		const tableSchema: string = (await this.schemaInspector.tableInfo(collection!)).schema!;
+		this.schemaInspector.withSchema!(tableSchema);
 		const schemaRows = await this.schemaInspector.foreignKeys(collection);
 		const results = this.stitchRelations(metaRows, schemaRows);
 		return await this.filterForbidden(results);
@@ -105,6 +107,8 @@ export class RelationsService {
 			},
 		});
 
+		const tableSchema: string = (await this.schemaInspector.tableInfo(collection)).schema!;
+		this.schemaInspector.withSchema!(tableSchema);
 		const schemaRow = (await this.schemaInspector.foreignKeys(collection)).find(
 			(foreignKey) => foreignKey.column === field
 		);
@@ -168,7 +172,8 @@ export class RelationsService {
 
 		await this.knex.transaction(async (trx) => {
 			if (relation.related_collection) {
-				await trx.schema.alterTable(relation.collection!, async (table) => {
+				const tableSchema: string = (await this.schemaInspector.tableInfo(relation.collection!)).schema!;
+				await trx.schema.withSchema!(tableSchema).alterTable(relation.collection!, async (table) => {
 					this.alterType(table, relation);
 
 					const constraintName: string = getDefaultIndexName('foreign', relation.collection!, relation.field!);
@@ -226,7 +231,8 @@ export class RelationsService {
 
 		await this.knex.transaction(async (trx) => {
 			if (existingRelation.related_collection) {
-				await trx.schema.alterTable(collection, async (table) => {
+				const tableSchema: string = (await this.schemaInspector.tableInfo(collection)).schema!;
+				await trx.schema.withSchema!(tableSchema).alterTable(collection, async (table) => {
 					let constraintName: string = getDefaultIndexName('foreign', collection, field);
 
 					// If the FK already exists in the DB, drop it first
@@ -302,7 +308,8 @@ export class RelationsService {
 
 		await this.knex.transaction(async (trx) => {
 			if (existingRelation.schema?.constraint_name) {
-				await trx.schema.alterTable(existingRelation.collection, (table) => {
+				const tableSchema: string = (await this.schemaInspector.tableInfo(existingRelation.collection)).schema!;
+				await trx.schema.withSchema!(tableSchema).alterTable(existingRelation.collection, (table) => {
 					table.dropForeign(existingRelation.field, existingRelation.schema!.constraint_name!);
 				});
 			}

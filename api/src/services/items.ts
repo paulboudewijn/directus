@@ -1,8 +1,9 @@
+import SchemaInspector from '@directus/schema';
 import { Knex } from 'knex';
 import { clone, cloneDeep, pick, without } from 'lodash';
 import { getCache } from '../cache';
 import Keyv from 'keyv';
-import getDatabase from '../database';
+import getDatabase, { getSchemaInspector } from '../database';
 import runAST from '../database/run-ast';
 import emitter from '../emitter';
 import env from '../env';
@@ -14,6 +15,7 @@ import getASTFromQuery from '../utils/get-ast-from-query';
 import { AuthorizationService } from './authorization';
 import { PayloadService } from './payload';
 import { ActivityService, RevisionsService } from './index';
+import { Table } from 'knex-schema-inspector/dist/types/table';
 
 export type QueryOptions = {
 	stripNonRequested?: boolean;
@@ -41,6 +43,7 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 	collection: string;
 	knex: Knex;
 	accountability: Accountability | null;
+	schemaInspector: ReturnType<typeof SchemaInspector>;
 	eventScope: string;
 	schema: SchemaOverview;
 	cache: Keyv<any> | null;
@@ -49,6 +52,7 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 		this.collection = collection;
 		this.knex = options.knex || getDatabase();
 		this.accountability = options.accountability || null;
+		this.schemaInspector = options.knex ? SchemaInspector(options.knex) : getSchemaInspector();
 		this.eventScope = this.collection.startsWith('directus_') ? this.collection.substring(9) : 'items';
 		this.schema = options.schema;
 		this.cache = getCache().cache;
@@ -134,8 +138,10 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 			// In case of manual string / UUID primary keys, they PK already exists in the object we're saving.
 			let primaryKey = payloadWithTypeCasting[primaryKeyField];
 
+			const tableSchema = (await this.schemaInspector.tableInfo(this.collection)).schema!;
+
 			try {
-				const result = await trx.insert(payloadWithoutAliases).into(this.collection).returning(primaryKeyField);
+				const result = await trx.withSchema!(tableSchema).insert(payloadWithoutAliases).into(this.collection).returning(primaryKeyField);
 				primaryKey = primaryKey ?? result[0];
 			} catch (err: any) {
 				throw await translateDatabaseError(err);
@@ -146,7 +152,7 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 			// fetching it based on the last inserted row
 			if (!primaryKey) {
 				// Fetching it with max should be safe, as we're in the context of the current transaction
-				const result = await trx.max(primaryKeyField, { as: 'id' }).from(this.collection).first();
+				const result = await trx.withSchema!(tableSchema).max(primaryKeyField, { as: 'id' }).from(this.collection).first();
 				primaryKey = result.id;
 				// Set the primary key on the input item, in order for the "after" event hook to be able
 				// to read from it
@@ -271,13 +277,15 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 			// operation's permissions. This is used to dynamically check if you have update/delete
 			// access to (a) certain item(s)
 			action: opts?.permissionsAction || 'read',
-			knex: this.knex,
+			knex: this.knex, 
 		});
 
 		if (this.accountability && this.accountability.admin !== true) {
 			ast = await authorizationService.processAST(ast, opts?.permissionsAction);
 		}
 
+		const tableSchema = (await this.schemaInspector.tableInfo(this.collection)).schema!;
+		this.knex.withSchema(tableSchema);
 		const records = await runAST(ast, this.schema, {
 			knex: this.knex,
 			// GraphQL requires relational keys to be returned regardless
@@ -544,10 +552,11 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 	async upsertOne(payload: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey> {
 		const primaryKeyField = this.schema.collections[this.collection].primary;
 		const primaryKey: PrimaryKey | undefined = payload[primaryKeyField];
+		const tableSchema = (await this.schemaInspector.tableInfo(this.collection)).schema!;
 
 		const exists =
 			primaryKey &&
-			!!(await this.knex
+			!!(await this.knex.withSchema!(tableSchema)
 				.select(primaryKeyField)
 				.from(this.collection)
 				.where({ [primaryKeyField]: primaryKey })
@@ -721,7 +730,8 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 	 */
 	async upsertSingleton(data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey> {
 		const primaryKeyField = this.schema.collections[this.collection].primary;
-		const record = await this.knex.select(primaryKeyField).from(this.collection).limit(1).first();
+		const tableSchema = (await this.schemaInspector.tableInfo(this.collection)).schema!;
+		const record = await this.knex.withSchema!(tableSchema).select(primaryKeyField).from(this.collection).limit(1).first();
 
 		if (record) {
 			return await this.updateOne(record[primaryKeyField], data, opts);

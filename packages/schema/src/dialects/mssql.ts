@@ -9,6 +9,7 @@ export default class MSSQL extends KnexMSSQL implements SchemaInspector {
 		const columns = await this.knex.raw(
 			`
 			SELECT
+				c.TABLE_SCHEMA as table_schema,
 				c.TABLE_NAME as table_name,
 				c.COLUMN_NAME as column_name,
 				c.COLUMN_DEFAULT as default_value,
@@ -47,6 +48,7 @@ export default class MSSQL extends KnexMSSQL implements SchemaInspector {
 					primary: columns.find((nested: { column_key: string; table_name: string }) => {
 						return nested.table_name === column.table_name && nested.column_key === 'PRIMARY';
 					})?.column_name,
+					tableSchema: column.table_schema,
 					columns: {},
 				};
 			}

@@ -1,16 +1,17 @@
+import SchemaInspector from '@directus/schema';
+import { Query } from '@directus/shared/types';
+import { toArray } from '@directus/shared/utils';
 import { Knex } from 'knex';
-import { clone, cloneDeep, pick, uniq, merge } from 'lodash';
+import { clone, cloneDeep, merge, pick, uniq } from 'lodash';
+import { getGeometryHelper } from '../database/helpers/geometry';
 import { PayloadService } from '../services/payload';
 import { Item, SchemaOverview } from '../types';
-import { AST, FieldNode, NestedCollectionNode, M2ONode } from '../types/ast';
+import { AST, FieldNode, M2ONode, NestedCollectionNode } from '../types/ast';
 import { applyFunctionToColumnName } from '../utils/apply-function-to-column-name';
 import applyQuery from '../utils/apply-query';
 import { getColumn } from '../utils/get-column';
 import { stripFunction } from '../utils/strip-function';
-import { toArray } from '@directus/shared/utils';
-import { Query } from '@directus/shared/types';
-import getDatabase from './index';
-import { getGeometryHelper } from '../database/helpers/geometry';
+import getDatabase, { getSchemaInspector } from './index';
 
 type RunASTOptions = {
 	/**
@@ -45,6 +46,7 @@ export default async function runAST(
 	const ast = cloneDeep(originalAST);
 
 	const knex = options?.knex || getDatabase();
+	const schemaInspector = options?.knex ? SchemaInspector(options.knex) : getSchemaInspector();
 
 	if (ast.type === 'm2a') {
 		const results: { [collection: string]: null | Item | Item[] } = {};
@@ -68,7 +70,8 @@ export default async function runAST(
 		);
 
 		// The actual knex query builder instance. This is a promise that resolves with the raw items from the db
-		const dbQuery = getDBQuery(schema, knex, collection, fieldNodes, query);
+		const tableSchema = (await schemaInspector.tableInfo(collection)).schema!;
+		const dbQuery = getDBQuery(schema, knex, tableSchema, collection, fieldNodes, query);
 
 		const rawItems: Item | Item[] = await dbQuery;
 
@@ -202,17 +205,18 @@ function getColumnPreprocessor(knex: Knex, schema: SchemaOverview, table: string
 function getDBQuery(
 	schema: SchemaOverview,
 	knex: Knex,
+	tableSchema: string,
 	table: string,
 	fieldNodes: FieldNode[],
 	query: Query
 ): Knex.QueryBuilder {
 	const preProcess = getColumnPreprocessor(knex, schema, table);
-	const dbQuery = knex.select(fieldNodes.map(preProcess)).from(table);
+	const dbQuery = knex.withSchema(tableSchema).select(fieldNodes.map(preProcess)).from(table); //PB20211207|OORZAAK
 	const queryCopy = clone(query);
 
 	queryCopy.limit = typeof queryCopy.limit === 'number' ? queryCopy.limit : 100;
 
-	return applyQuery(knex, table, dbQuery, queryCopy, schema);
+	return applyQuery(knex, tableSchema, table, dbQuery, queryCopy, schema);
 }
 
 function applyParentFilters(
